@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.2.1
-// @description  Gov orders widget - Instant loading & DOM Citizen ID logging
+// @version      1.3.0
+// @description  Gov orders widget - Live Division Tracking, Instant loading & DOM Citizen ID logging
 // @author       ZaraL
 // @match        https://www.erepublik.com/*
 // @grant        GM_xmlhttpRequest
@@ -59,10 +59,16 @@
         .gow-close-inst:hover { color: #fff; }
 
         .gow-col-right { display: flex; flex-direction: column; align-items: flex-end; gap: 4px; flex: 1; min-width: 130px; }
-        .gow-divs { display: flex; gap: 3px; flex-wrap: wrap; justify-content: flex-end; }
-        .gow-div { background: #444; padding: 3px 6px; border-radius: 3px; color: #bbb; font-weight: bold; text-decoration: none; font-size: 11px; }
+        .gow-divs { display: flex; gap: 4px; flex-wrap: wrap; justify-content: flex-end; }
+        
+        /* Ajustes de botones para acomodar los bordes dinámicos */
+        .gow-div { background: #444; padding: 1px 5px; border: 2px solid transparent; border-radius: 4px; color: #bbb; font-weight: bold; text-decoration: none; font-size: 11px; box-sizing: border-box; }
         .gow-div:hover { background: #666; color: #fff; }
-        .gow-div.priority { background: #fb7e3d; color: #fff; box-shadow: 0 0 3px #fb7e3d; }
+        .gow-div.priority { background: #fb7e3d; color: #fff; }
+        
+        /* Colores de victoria y derrota por división */
+        .gow-div-win { border-color: #5cbf0a; color: #fff; box-shadow: 0 0 3px #5cbf0a; }
+        .gow-div-lose { border-color: #e2403d; color: #fff; box-shadow: 0 0 3px #e2403d; }
         
         .gow-killcash { background: #ff0055; color: white; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 9px; text-transform: uppercase; border: 1px solid #ffcc00; animation: superFlash 0.8s infinite alternate; box-shadow: 0 0 6px #ff0055; white-space: nowrap; }
         @keyframes superFlash { 
@@ -79,7 +85,6 @@
         return `https://static.erepublik.tools/assets/img/erepublik/country/${id}.gif`;
     }
 
-    // EXTRAE LA ID DEL DOM DIRECTAMENTE (Infalible)
     function extractCitizenId() {
         try {
             if (window.SERVER_DATA && window.SERVER_DATA.citizenId) {
@@ -127,7 +132,7 @@
         return widget;
     }
 
-    function buildOrderHtml(orderData, isGhost, regionName, invId, defId, zoneIds) {
+    function buildOrderHtml(orderData, isGhost, regionName, invId, defId, zoneIds, winningCountries) {
         const ghostClass = isGhost ? 'gow-ghost' : '';
         const statusText = isGhost ? '<span style="color:#e2403d; font-size:10px; margin-left: 3px;">(ENDED)</span>' : '';
         
@@ -150,202 +155,22 @@
             const prioClass = isPriority ? 'priority' : '';
             const divLabel = div === 11 ? 'Air' : `D${div}`;
             
+            // Lógica de colores (Tracker)
+            let statusClass = '';
+            if (!isGhost && winningCountries && winningCountries[div] !== undefined && winningCountries[div] !== 0) {
+                if (winningCountries[div] === orderData.countryId) {
+                    statusClass = 'gow-div-win'; // Verde
+                } else {
+                    statusClass = 'gow-div-lose'; // Rojo
+                }
+            }
+            
             const realZoneId = (zoneIds && zoneIds[div]) ? zoneIds[div] : '';
             const targetUrl = realZoneId 
                 ? `/en/military/battlefield/${orderData.battleId}/${realZoneId}` 
                 : `/en/military/battlefield/${orderData.battleId}`;
 
-            divsHtml += `<a href="${targetUrl}" class="gow-div ${prioClass}">${divLabel}</a>`;
+            divsHtml += `<a href="${targetUrl}" class="gow-div ${prioClass} ${statusClass}">${divLabel}</a>`;
         });
 
-        const killcashHtml = orderData.killcash ? `<span class="gow-killcash">🔥 💰 KILLCASH 💰 🔥</span>` : '';
-        
-        let tinyFlagsHtml = '';
-        if (invId && defId) {
-            tinyFlagsHtml = `
-                <span class="gow-tiny-flags" title="Matchup">
-                    <img src="${getFlagUrl(invId)}"> vs <img src="${getFlagUrl(defId)}">
-                </span>`;
-        }
-
-        let instructionsHtml = '';
-        if (orderData.instructions && orderData.instructions.trim() !== '') {
-            const currentHash = btoa(unescape(encodeURIComponent(orderData.instructions))).substring(0, 15);
-            const instKey = `dismissed_inst_${orderData.battleId}`;
-            const dismissedHash = GM_getValue(instKey, '');
-            
-            if (currentHash !== dismissedHash) {
-                instructionsHtml = `
-                    <div class="gow-col-center" id="gow-inst-box-${orderData.battleId}">
-                        <span class="gow-close-inst" data-hash="${currentHash}" data-key="${instKey}" data-target="gow-inst-box-${orderData.battleId}">✖</span>
-                        <b>Orders:</b> ${orderData.instructions}
-                    </div>`;
-            }
-        }
-
-        return `
-            <div class="gow-order-card ${ghostClass} ${prioCardClass}">
-                <div class="gow-main-layout">
-                    <div class="gow-col-left">
-                        <div class="gow-battle-line">
-                            <a href="/en/military/battlefield/${orderData.battleId}" class="gow-battle">
-                                ${regionName} ${statusText}
-                            </a>
-                            ${tinyFlagsHtml}
-                            ${prioBadgeHtml}
-                        </div>
-                        <div class="gow-fight-for">
-                            Fight for: <img src="${getFlagUrl(orderData.countryId)}" class="gow-flag-main">
-                        </div>
-                    </div>
-
-                    ${instructionsHtml}
-
-                    <div class="gow-col-right">
-                        ${killcashHtml}
-                        <div class="gow-divs">${divsHtml}</div>
-                    </div>
-                </div>
-            </div>
-        `;
-    }
-
-    function renderAllOrders(enrichedOrders) {
-        const widget = getOrCreateWidget();
-
-        enrichedOrders.sort((a, b) => {
-            let prioA = a.priorityLevel > 0 ? a.priorityLevel : 99;
-            let prioB = b.priorityLevel > 0 ? b.priorityLevel : 99;
-            return prioA - prioB;
-        });
-
-        let allOrdersHtml = enrichedOrders.map(o => 
-            buildOrderHtml(o, o.isGhost, o.regionName, o.invId, o.defId, o.zoneIds)
-        ).join('');
-
-        if (enrichedOrders.length === 0) {
-            allOrdersHtml = `<div style="padding: 10px; text-align: center; color: #888;">No active orders.</div>`;
-        }
-
-        const onHome = isHomepage();
-        const isMinimized = GM_getValue('gow_minimized', false);
-        const shouldHide = !onHome && isMinimized;
-        const containerClass = shouldHide ? 'gow-container minimized' : 'gow-container';
-        
-        let headerHtml = `<span>eUK Gov Orders</span>`;
-        if (!onHome) {
-            const toggleText = shouldHide ? '[+] Show' : '[-] Hide';
-            headerHtml += `<span class="gow-toggle-btn">${toggleText}</span>`;
-        }
-
-        widget.innerHTML = `
-            <div class="gow-header ${!onHome ? 'clickable' : ''}" id="gow-header-toggle">
-                ${headerHtml}
-            </div>
-            <div class="${containerClass}" id="gow-content-box">
-                ${allOrdersHtml}
-            </div>
-        `;
-
-        if (!onHome) {
-            const toggleHeader = document.getElementById('gow-header-toggle');
-            if (toggleHeader) {
-                toggleHeader.addEventListener('click', () => {
-                    const box = document.getElementById('gow-content-box');
-                    const btn = widget.querySelector('.gow-toggle-btn');
-                    const currentlyMin = box.classList.toggle('minimized');
-                    
-                    GM_setValue('gow_minimized', currentlyMin);
-                    if (btn) btn.textContent = currentlyMin ? '[+] Show' : '[-] Hide';
-                });
-            }
-        }
-
-        document.querySelectorAll('.gow-close-inst').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                const targetId = e.target.getAttribute('data-target');
-                const key = e.target.getAttribute('data-key');
-                const hash = e.target.getAttribute('data-hash');
-                
-                GM_setValue(key, hash);
-                const box = document.getElementById(targetId);
-                if (box) box.style.display = 'none';
-            });
-        });
-    }
-
-    function checkBattleStatuses(ordersArray) {
-        fetch('https://www.erepublik.com/en/military/campaignsJson/list')
-            .then(res => res.json())
-            .then(data => {
-                const enrichedOrders = ordersArray.map(orderData => {
-                    let isGhost = true;
-                    let regionName = `Battle #${orderData.battleId}`;
-                    let invId = 0, defId = 0, zoneIds = null;
-
-                    if (data.battles && data.battles[orderData.battleId]) {
-                        isGhost = false;
-                        const b = data.battles[orderData.battleId];
-                        regionName = b.region.name;
-                        invId = b.inv.id;
-                        defId = b.def.id;
-                        
-                        if (b.div) {
-                            let sortedDivs = Object.keys(b.div).sort((a, b) => parseInt(a) - parseInt(b));
-                            zoneIds = {
-                                1: sortedDivs[0], 2: sortedDivs[1], 3: sortedDivs[2], 4: sortedDivs[3], 11: sortedDivs[sortedDivs.length - 1]
-                            };
-                        }
-                    }
-                    return { ...orderData, isGhost, regionName, invId, defId, zoneIds };
-                });
-                
-                GM_setValue('gow_cached_enriched', JSON.stringify(enrichedOrders));
-                renderAllOrders(enrichedOrders);
-            })
-            .catch(err => console.error('[GovOrders] Error checking battle status:', err));
-    }
-
-    function syncOrders() {
-        const citizenId = extractCitizenId();
-        const requestUrl = GOV_ORDERS_URL + "?citizenId=" + citizenId + "&t=" + new Date().getTime();
-
-        GM_xmlhttpRequest({
-            method: "GET",
-            url: requestUrl,
-            onload: function(response) {
-                try {
-                    const ordersArray = JSON.parse(response.responseText);
-                    if (Array.isArray(ordersArray)) checkBattleStatuses(ordersArray);
-                } catch (e) {
-                    console.error('[GovOrders] Failed to parse JSON orders:', e);
-                }
-            }
-        });
-    }
-
-    function init() {
-        const widget = getOrCreateWidget();
-        const cachedData = GM_getValue('gow_cached_enriched', null);
-
-        if (cachedData) {
-            try {
-                renderAllOrders(JSON.parse(cachedData));
-            } catch(e) {}
-        } else {
-            widget.innerHTML = `
-                <div class="gow-header">eUK Gov Orders</div>
-                <div class="gow-loading">⏳ Loading official orders...</div>
-            `;
-        }
-
-        syncOrders();
-        setInterval(syncOrders, UPDATE_INTERVAL_MS);
-    }
-
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', init);
-    } else {
-        init();
-    }
-})();
+        const killcash
