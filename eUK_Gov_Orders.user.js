@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.0.1
+// @version      1.1.0
 // @description  Gov orders widget - Embedded on homepage, collapsible with persistent state on other pages
 // @author       ZaraL
 // @match        https://www.erepublik.com/*
@@ -10,6 +10,8 @@
 // @grant        GM_getValue
 // @connect      script.googleusercontent.com
 // @connect      script.google.com
+// @downloadURL  https://github.com/drath21/euk-orders/raw/refs/heads/main/eUK_Gov_Orders.user.js
+// @updateURL    https://github.com/drath21/euk-orders/raw/refs/heads/main/eUK_Gov_Orders.user.js
 // ==/UserScript==
 
 (function() {
