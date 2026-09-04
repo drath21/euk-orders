@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.1.0
-// @description  Gov orders widget - Embedded on homepage, collapsible with persistent state on other pages
+// @version      1.2.0
+// @description  Gov orders widget - Instant loading & Citizen ID logging
 // @author       ZaraL
 // @match        https://www.erepublik.com/*
 // @grant        GM_xmlhttpRequest
@@ -29,6 +29,7 @@
         .gow-container { max-height: none; overflow-y: visible; }
         .gow-container.minimized { display: none; }
         
+        .gow-loading { padding: 12px; text-align: center; color: #aaa; font-style: italic; font-size: 11px; }
         .gow-order-card { padding: 8px; border-bottom: 1px solid #333; border-left: 3px solid transparent; }
         .gow-order-card:last-child { border-bottom: none; }
         
@@ -71,7 +72,6 @@
     `);
 
     function isHomepage() {
-        // Detecta si estamos en la página de inicio principal
         return window.location.pathname === '/en' || window.location.pathname === '/' || window.location.pathname === '/en/index';
     }
 
@@ -79,30 +79,47 @@
         return `https://static.erepublik.tools/assets/img/erepublik/country/${id}.gif`;
     }
 
-    function injectWidget(widgetElement) {
-        if (document.getElementById('gov-orders-inline')) return;
-        let insertionPoint = null;
-        
-        if (window.location.href.includes('/military/battlefield')) {
-            insertionPoint = document.getElementById('pvp') || document.querySelector('.paged_header');
-            if (insertionPoint) {
-                insertionPoint.parentNode.insertBefore(widgetElement, insertionPoint);
-                return;
+    function getCitizenId() {
+        try {
+            if (window.SERVER_DATA && window.SERVER_DATA.citizenId) {
+                return window.SERVER_DATA.citizenId;
             }
-        }
-        
-        insertionPoint = document.getElementById('weekly_challenge') || document.querySelector('.weekly_challenge');
-        if (!insertionPoint) {
-            insertionPoint = document.querySelector('.column.content') || document.getElementById('content');
-            if (insertionPoint) {
-                insertionPoint.insertBefore(widgetElement, insertionPoint.firstChild);
-                return;
-            }
-        }
+        } catch(e) {}
+        return 0;
+    }
 
-        if (insertionPoint && insertionPoint.parentNode) {
-            insertionPoint.parentNode.insertBefore(widgetElement, insertionPoint.nextSibling);
+    // Inyección inmediata sin retardos
+    function getOrCreateWidget() {
+        let widget = document.getElementById('gov-orders-inline');
+        if (!widget) {
+            widget = document.createElement('div');
+            widget.id = 'gov-orders-inline';
+            
+            let insertionPoint = null;
+            if (window.location.href.includes('/military/battlefield')) {
+                insertionPoint = document.getElementById('pvp') || document.querySelector('.paged_header');
+                if (insertionPoint && insertionPoint.parentNode) {
+                    insertionPoint.parentNode.insertBefore(widget, insertionPoint);
+                    return widget;
+                }
+            }
+            
+            insertionPoint = document.getElementById('weekly_challenge') || document.querySelector('.weekly_challenge');
+            if (!insertionPoint) {
+                insertionPoint = document.querySelector('.column.content') || document.getElementById('content');
+                if (insertionPoint) {
+                    insertionPoint.insertBefore(widget, insertionPoint.firstChild);
+                    return widget;
+                }
+            }
+
+            if (insertionPoint && insertionPoint.parentNode) {
+                insertionPoint.parentNode.insertBefore(widget, insertionPoint.nextSibling);
+            } else {
+                document.body.appendChild(widget);
+            }
         }
+        return widget;
     }
 
     function buildOrderHtml(orderData, isGhost, regionName, invId, defId, zoneIds) {
@@ -189,12 +206,7 @@
     }
 
     function renderAllOrders(enrichedOrders) {
-        let widget = document.getElementById('gov-orders-inline');
-        if (!widget) {
-            widget = document.createElement('div');
-            widget.id = 'gov-orders-inline';
-            injectWidget(widget);
-        }
+        const widget = getOrCreateWidget();
 
         enrichedOrders.sort((a, b) => {
             let prioA = a.priorityLevel > 0 ? a.priorityLevel : 99;
@@ -212,14 +224,10 @@
 
         const onHome = isHomepage();
         const isMinimized = GM_getValue('gow_minimized', false);
-        
-        // En la Home SIEMPRE se muestra expandido. En el resto de páginas respeta la elección guardada.
         const shouldHide = !onHome && isMinimized;
         const containerClass = shouldHide ? 'gow-container minimized' : 'gow-container';
         
         let headerHtml = `<span>eUK Gov Orders</span>`;
-        
-        // Solo renderizar el botón de ocultar si NO estamos en la página principal
         if (!onHome) {
             const toggleText = shouldHide ? '[+] Show' : '[-] Hide';
             headerHtml += `<span class="gow-toggle-btn">${toggleText}</span>`;
@@ -234,16 +242,18 @@
             </div>
         `;
 
-        // Solo activar el evento de click fuera de la Home
         if (!onHome) {
-            document.getElementById('gow-header-toggle').addEventListener('click', () => {
-                const box = document.getElementById('gow-content-box');
-                const btn = widget.querySelector('.gow-toggle-btn');
-                const currentlyMin = box.classList.toggle('minimized');
-                
-                GM_setValue('gow_minimized', currentlyMin);
-                if (btn) btn.textContent = currentlyMin ? '[+] Show' : '[-] Hide';
-            });
+            const toggleHeader = document.getElementById('gow-header-toggle');
+            if (toggleHeader) {
+                toggleHeader.addEventListener('click', () => {
+                    const box = document.getElementById('gow-content-box');
+                    const btn = widget.querySelector('.gow-toggle-btn');
+                    const currentlyMin = box.classList.toggle('minimized');
+                    
+                    GM_setValue('gow_minimized', currentlyMin);
+                    if (btn) btn.textContent = currentlyMin ? '[+] Show' : '[-] Hide';
+                });
+            }
         }
 
         document.querySelectorAll('.gow-close-inst').forEach(btn => {
@@ -284,15 +294,21 @@
                     }
                     return { ...orderData, isGhost, regionName, invId, defId, zoneIds };
                 });
+                
+                // Guardar en caché para carga instantánea en la siguiente visita
+                GM_setValue('gow_cached_enriched', JSON.stringify(enrichedOrders));
                 renderAllOrders(enrichedOrders);
             })
             .catch(err => console.error('[GovOrders] Error checking battle status:', err));
     }
 
     function syncOrders() {
+        const citizenId = getCitizenId();
+        const requestUrl = GOV_ORDERS_URL + "?citizenId=" + citizenId + "&t=" + new Date().getTime();
+
         GM_xmlhttpRequest({
             method: "GET",
-            url: GOV_ORDERS_URL + "?t=" + new Date().getTime(),
+            url: requestUrl,
             onload: function(response) {
                 try {
                     const ordersArray = JSON.parse(response.responseText);
@@ -304,8 +320,34 @@
         });
     }
 
-    setTimeout(() => {
+    // INICIALIZACIÓN INSTANTÁNEA
+    function init() {
+        const widget = getOrCreateWidget();
+        const cachedData = GM_getValue('gow_cached_enriched', null);
+
+        // Si hay caché guardada de la última sesión, la dibuja EN 0 MILISEGUNDOS
+        if (cachedData) {
+            try {
+                renderAllOrders(JSON.parse(cachedData));
+            } catch(e) {}
+        } else {
+            // Si es la primera vez que entra, muestra el estado de carga al instante
+            const onHome = isHomepage();
+            widget.innerHTML = `
+                <div class="gow-header">eUK Gov Orders</div>
+                <div class="gow-loading">⏳ Loading official orders...</div>
+            `;
+        }
+
+        // Sincroniza en segundo plano sin congelar la web
         syncOrders();
         setInterval(syncOrders, UPDATE_INTERVAL_MS);
-    }, 1000);
+    }
+
+    // Ejecutar inmediatamente en cuanto el DOM empiece a existir
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
+    }
 })();
