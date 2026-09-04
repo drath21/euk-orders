@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.2.0
-// @description  Gov orders widget - Instant loading & Citizen ID logging
+// @version      1.2.1
+// @description  Gov orders widget - Instant loading & DOM Citizen ID logging
 // @author       ZaraL
 // @match        https://www.erepublik.com/*
 // @grant        GM_xmlhttpRequest
@@ -79,16 +79,21 @@
         return `https://static.erepublik.tools/assets/img/erepublik/country/${id}.gif`;
     }
 
-    function getCitizenId() {
+    // EXTRAE LA ID DEL DOM DIRECTAMENTE (Infalible)
+    function extractCitizenId() {
         try {
             if (window.SERVER_DATA && window.SERVER_DATA.citizenId) {
                 return window.SERVER_DATA.citizenId;
             }
+            const profileLink = document.querySelector('a.user_avatar') || document.querySelector('a[href*="/citizen/profile/"]');
+            if (profileLink && profileLink.href) {
+                const match = profileLink.href.match(/\/profile\/(\d+)/);
+                if (match) return match[1];
+            }
         } catch(e) {}
-        return 0;
+        return "0";
     }
 
-    // Inyección inmediata sin retardos
     function getOrCreateWidget() {
         let widget = document.getElementById('gov-orders-inline');
         if (!widget) {
@@ -295,7 +300,6 @@
                     return { ...orderData, isGhost, regionName, invId, defId, zoneIds };
                 });
                 
-                // Guardar en caché para carga instantánea en la siguiente visita
                 GM_setValue('gow_cached_enriched', JSON.stringify(enrichedOrders));
                 renderAllOrders(enrichedOrders);
             })
@@ -303,7 +307,7 @@
     }
 
     function syncOrders() {
-        const citizenId = getCitizenId();
+        const citizenId = extractCitizenId();
         const requestUrl = GOV_ORDERS_URL + "?citizenId=" + citizenId + "&t=" + new Date().getTime();
 
         GM_xmlhttpRequest({
@@ -320,31 +324,25 @@
         });
     }
 
-    // INICIALIZACIÓN INSTANTÁNEA
     function init() {
         const widget = getOrCreateWidget();
         const cachedData = GM_getValue('gow_cached_enriched', null);
 
-        // Si hay caché guardada de la última sesión, la dibuja EN 0 MILISEGUNDOS
         if (cachedData) {
             try {
                 renderAllOrders(JSON.parse(cachedData));
             } catch(e) {}
         } else {
-            // Si es la primera vez que entra, muestra el estado de carga al instante
-            const onHome = isHomepage();
             widget.innerHTML = `
                 <div class="gow-header">eUK Gov Orders</div>
                 <div class="gow-loading">⏳ Loading official orders...</div>
             `;
         }
 
-        // Sincroniza en segundo plano sin congelar la web
         syncOrders();
         setInterval(syncOrders, UPDATE_INTERVAL_MS);
     }
 
-    // Ejecutar inmediatamente en cuanto el DOM empiece a existir
     if (document.readyState === 'loading') {
         document.addEventListener('DOMContentLoaded', init);
     } else {
