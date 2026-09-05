@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.4.4
-// @description  Gov orders widget - Live Tracking, Weekly Tuesday Claim, strict DOM Country Reader & ID logging
+// @version      1.4.5
+// @description  Gov orders widget - Live Tracking, Weekly Tuesday Claim, Bulletproof Country Fetch & ID logging
 // @author       ZaraL
 // @match        https://www.erepublik.com/*
 // @grant        GM_xmlhttpRequest
@@ -110,25 +110,24 @@
         return "0";
     }
 
-    // NUEVA FUNCIÓN EXTRACTORA (Busca específicamente en la barra lateral del usuario)
-    function extractCitizenCountry() {
-        try {
-            // 1. Lee la banderita de la zona del perfil (Barra lateral izquierda junto al nombre)
-            const sidebarFlag = document.querySelector('.user_info img[src*="/country/"]') || 
-                                document.querySelector('.citizen_info img[src*="/country/"]') ||
-                                document.querySelector('a[href*="/citizen/profile/"] img[src*="/country/"]');
-            
-            if (sidebarFlag && sidebarFlag.src) {
-                const match = sidebarFlag.src.match(/country\/(\d+)/);
-                if (match) return match[1];
-            }
+    // MÉTODO INFALIBLE: Le pide al propio eRepublik tu JSON privado usando tu sesión
+    function getCitizenCountry(citizenId, callback) {
+        // 1. Variable nativa (rápido)
+        if (window.SERVER_DATA && window.SERVER_DATA.citizenshipCountryId) {
+            return callback(window.SERVER_DATA.citizenshipCountryId);
+        }
 
-            // 2. Respaldo limpio: variable nativa del servidor oficial
-            if (window.SERVER_DATA && window.SERVER_DATA.citizenshipCountryId) {
-                return window.SERVER_DATA.citizenshipCountryId;
-            }
-        } catch(e) {}
-        return "";
+        // 2. Si falla, hace una petición al JSON del perfil (Infalible)
+        fetch('/en/main/citizen-profile-json/' + citizenId)
+            .then(res => res.json())
+            .then(data => {
+                if (data && data.citizenship && data.citizenship.countryId) {
+                    callback(data.citizenship.countryId);
+                } else {
+                    callback(""); // Fallo de seguridad interno del juego
+                }
+            })
+            .catch(() => callback(""));
     }
 
     function getLastTuesdayNineAM() {
@@ -351,28 +350,29 @@
                 claimBtn.textContent = "WAIT...";
                 claimBtn.disabled = true;
 
-                const userCountry = extractCitizenCountry();
-                const claimUrl = GOV_ORDERS_URL + "?action=claim&citizenId=" + citizenId + "&country=" + userCountry + "&t=" + new Date().getTime();
+                getCitizenCountry(citizenId, function(userCountry) {
+                    const claimUrl = GOV_ORDERS_URL + "?action=claim&citizenId=" + citizenId + "&country=" + userCountry + "&t=" + new Date().getTime();
 
-                GM_xmlhttpRequest({
-                    method: "GET",
-                    url: claimUrl,
-                    onload: function(res) {
-                        try {
-                            const response = JSON.parse(res.responseText);
-                            if (response.success) {
-                                GM_setValue('gow_last_claim_' + citizenId, new Date().getTime());
-                                claimBtn.textContent = "CLAIMED";
-                                alert('Success! Your claim has been registered in the Government log.');
-                            } else {
-                                throw new Error("Invalid response");
+                    GM_xmlhttpRequest({
+                        method: "GET",
+                        url: claimUrl,
+                        onload: function(res) {
+                            try {
+                                const response = JSON.parse(res.responseText);
+                                if (response.success) {
+                                    GM_setValue('gow_last_claim_' + citizenId, new Date().getTime());
+                                    claimBtn.textContent = "CLAIMED";
+                                    alert('Success! Your claim has been registered in the Government log.');
+                                } else {
+                                    throw new Error("Invalid response");
+                                }
+                            } catch(err) {
+                                claimBtn.textContent = "CLAIM!";
+                                claimBtn.disabled = false;
+                                alert('Oops! Could not connect to the Google Sheet. Please try again later.');
                             }
-                        } catch(err) {
-                            claimBtn.textContent = "CLAIM!";
-                            claimBtn.disabled = false;
-                            alert('Oops! Could not connect to the Google Sheet. Please try again later.');
                         }
-                    }
+                    });
                 });
             });
         }
@@ -438,27 +438,29 @@
 
     function syncOrders() {
         if (!isLoggedIn()) return;
-
         const citizenId = extractCitizenId();
-        const userCountry = extractCitizenCountry();
-        const requestUrl = GOV_ORDERS_URL + "?citizenId=" + citizenId + "&country=" + userCountry + "&t=" + new Date().getTime();
 
-        GM_xmlhttpRequest({
-            method: "GET",
-            url: requestUrl,
-            onload: function(response) {
-                try {
-                    const ordersArray = JSON.parse(response.responseText);
-                    if (Array.isArray(ordersArray)) {
-                        checkBattleStatuses(ordersArray);
-                    } else if (response.responseText.includes("Access Denied")) {
-                        const widget = document.getElementById('gov-orders-inline');
-                        if (widget) widget.innerHTML = `<div class="gow-header">eUK Gov Orders</div><div style="padding:12px; text-align:center; color:#e2403d;">⛔ Access Denied: Unauthorized Country or ID</div>`;
+        // 1. Extraer el país de forma infalible ANTES de contactar con Google
+        getCitizenCountry(citizenId, function(userCountry) {
+            const requestUrl = GOV_ORDERS_URL + "?citizenId=" + citizenId + "&country=" + userCountry + "&t=" + new Date().getTime();
+
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: requestUrl,
+                onload: function(response) {
+                    try {
+                        const ordersArray = JSON.parse(response.responseText);
+                        if (Array.isArray(ordersArray)) {
+                            checkBattleStatuses(ordersArray);
+                        } else if (response.responseText.includes("Access Denied")) {
+                            const widget = document.getElementById('gov-orders-inline');
+                            if (widget) widget.innerHTML = `<div class="gow-header">eUK Gov Orders</div><div style="padding:12px; text-align:center; color:#e2403d;">⛔ Access Denied: Unauthorized Country or ID</div>`;
+                        }
+                    } catch (e) {
+                        console.error('[GovOrders] Failed to parse JSON orders:', e);
                     }
-                } catch (e) {
-                    console.error('[GovOrders] Failed to parse JSON orders:', e);
                 }
-            }
+            });
         });
     }
 
