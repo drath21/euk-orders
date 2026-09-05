@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.4.3
-// @description  Gov orders widget - Live Tracking, Weekly Tuesday Claim, DOM Country Reader & ID logging
+// @version      1.4.4
+// @description  Gov orders widget - Live Tracking, Weekly Tuesday Claim, strict DOM Country Reader & ID logging
 // @author       ZaraL
 // @match        https://www.erepublik.com/*
 // @grant        GM_xmlhttpRequest
@@ -110,18 +110,22 @@
         return "0";
     }
 
-    // EXTRAE EL PAÍS/BANDERA DIRECTAMENTE DEL DOM
+    // NUEVA FUNCIÓN EXTRACTORA (Busca específicamente en la barra lateral del usuario)
     function extractCitizenCountry() {
         try {
-            if (window.SERVER_DATA && (window.SERVER_DATA.countryId || window.SERVER_DATA.citizenCountryId)) {
-                return window.SERVER_DATA.countryId || window.SERVER_DATA.citizenCountryId;
-            }
-            const flagImg = document.querySelector('.user_info img[src*="/country/"]') || 
-                            document.querySelector('.user_header img[src*="/country/"]') ||
-                            document.querySelector('img[src*="/assets/img/erepublik/country/"]');
-            if (flagImg && flagImg.src) {
-                const match = flagImg.src.match(/country\/(\d+)/);
+            // 1. Lee la banderita de la zona del perfil (Barra lateral izquierda junto al nombre)
+            const sidebarFlag = document.querySelector('.user_info img[src*="/country/"]') || 
+                                document.querySelector('.citizen_info img[src*="/country/"]') ||
+                                document.querySelector('a[href*="/citizen/profile/"] img[src*="/country/"]');
+            
+            if (sidebarFlag && sidebarFlag.src) {
+                const match = sidebarFlag.src.match(/country\/(\d+)/);
                 if (match) return match[1];
+            }
+
+            // 2. Respaldo limpio: variable nativa del servidor oficial
+            if (window.SERVER_DATA && window.SERVER_DATA.citizenshipCountryId) {
+                return window.SERVER_DATA.citizenshipCountryId;
             }
         } catch(e) {}
         return "";
