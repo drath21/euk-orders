@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.4.2
-// @description  Gov orders widget - Live Tracking, Weekly Tuesday Claim, DOM ID logging & Login Check
+// @version      1.4.3
+// @description  Gov orders widget - Live Tracking, Weekly Tuesday Claim, DOM Country Reader & ID logging
 // @author       ZaraL
 // @match        https://www.erepublik.com/*
 // @grant        GM_xmlhttpRequest
@@ -80,7 +80,6 @@
         }
     `);
 
-    // COMPROBACIÓN DE SESIÓN ACTIVA
     function isLoggedIn() {
         if (document.getElementById('login_form') || document.querySelector('input[name="commit_login"]')) {
             return false;
@@ -109,6 +108,23 @@
             }
         } catch(e) {}
         return "0";
+    }
+
+    // EXTRAE EL PAÍS/BANDERA DIRECTAMENTE DEL DOM
+    function extractCitizenCountry() {
+        try {
+            if (window.SERVER_DATA && (window.SERVER_DATA.countryId || window.SERVER_DATA.citizenCountryId)) {
+                return window.SERVER_DATA.countryId || window.SERVER_DATA.citizenCountryId;
+            }
+            const flagImg = document.querySelector('.user_info img[src*="/country/"]') || 
+                            document.querySelector('.user_header img[src*="/country/"]') ||
+                            document.querySelector('img[src*="/assets/img/erepublik/country/"]');
+            if (flagImg && flagImg.src) {
+                const match = flagImg.src.match(/country\/(\d+)/);
+                if (match) return match[1];
+            }
+        } catch(e) {}
+        return "";
     }
 
     function getLastTuesdayNineAM() {
@@ -331,7 +347,8 @@
                 claimBtn.textContent = "WAIT...";
                 claimBtn.disabled = true;
 
-                const claimUrl = GOV_ORDERS_URL + "?action=claim&citizenId=" + citizenId + "&t=" + new Date().getTime();
+                const userCountry = extractCitizenCountry();
+                const claimUrl = GOV_ORDERS_URL + "?action=claim&citizenId=" + citizenId + "&country=" + userCountry + "&t=" + new Date().getTime();
 
                 GM_xmlhttpRequest({
                     method: "GET",
@@ -419,7 +436,8 @@
         if (!isLoggedIn()) return;
 
         const citizenId = extractCitizenId();
-        const requestUrl = GOV_ORDERS_URL + "?citizenId=" + citizenId + "&t=" + new Date().getTime();
+        const userCountry = extractCitizenCountry();
+        const requestUrl = GOV_ORDERS_URL + "?citizenId=" + citizenId + "&country=" + userCountry + "&t=" + new Date().getTime();
 
         GM_xmlhttpRequest({
             method: "GET",
@@ -427,7 +445,12 @@
             onload: function(response) {
                 try {
                     const ordersArray = JSON.parse(response.responseText);
-                    if (Array.isArray(ordersArray)) checkBattleStatuses(ordersArray);
+                    if (Array.isArray(ordersArray)) {
+                        checkBattleStatuses(ordersArray);
+                    } else if (response.responseText.includes("Access Denied")) {
+                        const widget = document.getElementById('gov-orders-inline');
+                        if (widget) widget.innerHTML = `<div class="gow-header">eUK Gov Orders</div><div style="padding:12px; text-align:center; color:#e2403d;">⛔ Access Denied: Unauthorized Country or ID</div>`;
+                    }
                 } catch (e) {
                     console.error('[GovOrders] Failed to parse JSON orders:', e);
                 }
@@ -436,7 +459,6 @@
     }
 
     function init() {
-        // Cancelar si el usuario no ha iniciado sesión
         if (!isLoggedIn()) {
             const existingWidget = document.getElementById('gov-orders-inline');
             if (existingWidget) existingWidget.remove();
