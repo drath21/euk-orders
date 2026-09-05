@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.4.1
-// @description  Gov orders widget - Live Tracking, Weekly Tuesday Claim & DOM ID logging
+// @version      1.4.2
+// @description  Gov orders widget - Live Tracking, Weekly Tuesday Claim, DOM ID logging & Login Check
 // @author       ZaraL
 // @match        https://www.erepublik.com/*
 // @grant        GM_xmlhttpRequest
@@ -80,6 +80,15 @@
         }
     `);
 
+    // COMPROBACIÓN DE SESIÓN ACTIVA
+    function isLoggedIn() {
+        if (document.getElementById('login_form') || document.querySelector('input[name="commit_login"]')) {
+            return false;
+        }
+        const citizenId = extractCitizenId();
+        return citizenId !== "0" && citizenId !== 0 && citizenId !== null;
+    }
+
     function isHomepage() {
         return window.location.pathname === '/en' || window.location.pathname === '/' || window.location.pathname === '/en/index';
     }
@@ -110,7 +119,7 @@
         let target = new Date(spainDate);
         target.setHours(9, 0, 0, 0);
 
-        const currentDay = spainDate.getDay(); // 0: Dom, 1: Lun, 2: Mar...
+        const currentDay = spainDate.getDay();
         let daysToSubtract = (currentDay >= 2) ? (currentDay - 2) : (currentDay + 5);
         
         if (currentDay === 2 && spainDate.getHours() < 9) {
@@ -247,6 +256,8 @@
     }
 
     function renderAllOrders(enrichedOrders) {
+        if (!isLoggedIn()) return;
+
         const widget = getOrCreateWidget();
         const citizenId = extractCitizenId();
 
@@ -264,7 +275,6 @@
             allOrdersHtml = `<div style="padding: 16px; text-align: center; color: #aaa; font-style: italic; font-size: 12px;">No active orders from the Government at this moment.</div>`;
         }
 
-        // LÓGICA DE CLAIM! REINICIADA CADA MARTES A LAS 09:00
         const lastClaimTime = GM_getValue('gow_last_claim_' + citizenId, 0);
         const lastTuesdayReset = getLastTuesdayNineAM();
         const canClaim = lastClaimTime < lastTuesdayReset;
@@ -360,6 +370,8 @@
     }
 
     function checkBattleStatuses(ordersArray) {
+        if (!isLoggedIn()) return;
+
         GM_xmlhttpRequest({
             method: "GET",
             url: "https://www.erepublik.com/en/military/campaignsJson/list",
@@ -404,6 +416,8 @@
     }
 
     function syncOrders() {
+        if (!isLoggedIn()) return;
+
         const citizenId = extractCitizenId();
         const requestUrl = GOV_ORDERS_URL + "?citizenId=" + citizenId + "&t=" + new Date().getTime();
 
@@ -422,6 +436,13 @@
     }
 
     function init() {
+        // Cancelar si el usuario no ha iniciado sesión
+        if (!isLoggedIn()) {
+            const existingWidget = document.getElementById('gov-orders-inline');
+            if (existingWidget) existingWidget.remove();
+            return;
+        }
+
         const widget = getOrCreateWidget();
         const cachedData = GM_getValue('gow_cached_enriched', null);
 
