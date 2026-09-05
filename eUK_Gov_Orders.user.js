@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.3.1
-// @description  Gov orders widget - Live Division Tracking, Instant loading & DOM Citizen ID logging
+// @version      1.4.0
+// @description  Gov orders widget - Live Tracking, Weekly Claim System & DOM ID logging
 // @author       ZaraL
 // @match        https://www.erepublik.com/*
 // @grant        GM_xmlhttpRequest
@@ -20,6 +20,7 @@
 
     const GOV_ORDERS_URL = "https://script.google.com/macros/s/AKfycbyCCcZALnzVeFDHvzi0KUsMpELkSOGW--gT3BEcHKrCEo5wSHfTJmAfNo8nqyFMBFE/exec";
     const UPDATE_INTERVAL_MS = 5 * 60 * 1000;
+    const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
     GM_addStyle(`
         #gov-orders-inline { background: #242b27; color: #fff; font-family: Arial, sans-serif; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.4); overflow: hidden; font-size: 11px; margin: 4px 0; width: 100%; box-sizing: border-box; }
@@ -30,6 +31,10 @@
         .gow-container { max-height: none; overflow-y: visible; }
         .gow-container.minimized { display: none; }
         
+        .gow-claim-btn { background: #fb7e3d; color: white; border: none; padding: 3px 8px; border-radius: 3px; font-weight: bold; cursor: pointer; font-size: 10px; box-shadow: 0 0 4px #fb7e3d; text-transform: uppercase; margin-left: 10px; transition: 0.2s; }
+        .gow-claim-btn:hover { background: #ff955c; }
+        .gow-claim-btn:disabled { background: #555; color: #999; cursor: not-allowed; box-shadow: none; border: 1px solid #444; }
+
         .gow-loading { padding: 12px; text-align: center; color: #aaa; font-style: italic; font-size: 11px; }
         .gow-order-card { padding: 8px; border-bottom: 1px solid #333; border-left: 3px solid transparent; }
         .gow-order-card:last-child { border-bottom: none; }
@@ -225,6 +230,7 @@
 
     function renderAllOrders(enrichedOrders) {
         const widget = getOrCreateWidget();
+        const citizenId = extractCitizenId();
 
         enrichedOrders.sort((a, b) => {
             let prioA = a.priorityLevel > 0 ? a.priorityLevel : 99;
@@ -240,12 +246,20 @@
             allOrdersHtml = `<div style="padding: 16px; text-align: center; color: #aaa; font-style: italic; font-size: 12px;">No active orders from the Government at this moment.</div>`;
         }
 
+        // LÓGICA DE CLAIM!
+        const lastClaimTime = GM_getValue('gow_last_claim_' + citizenId, 0);
+        const canClaim = (new Date().getTime() - lastClaimTime) > WEEK_MS;
+        
+        let claimBtnHtml = canClaim
+            ? `<button id="gow-btn-claim" class="gow-claim-btn" title="Claim your weekly reward">CLAIM!</button>`
+            : `<button id="gow-btn-claim" class="gow-claim-btn" disabled title="You can claim again next week">CLAIMED</button>`;
+
         const onHome = isHomepage();
         const isMinimized = GM_getValue('gow_minimized', false);
         const shouldHide = !onHome && isMinimized;
         const containerClass = shouldHide ? 'gow-container minimized' : 'gow-container';
         
-        let headerHtml = `<span>eUK Gov Orders</span>`;
+        let headerHtml = `<div style="display:flex; align-items:center;"><span>eUK Gov Orders</span> ${claimBtnHtml}</div>`;
         if (!onHome) {
             const toggleText = shouldHide ? '[+] Show' : '[-] Hide';
             headerHtml += `<span class="gow-toggle-btn">${toggleText}</span>`;
@@ -263,7 +277,10 @@
         if (!onHome) {
             const toggleHeader = document.getElementById('gow-header-toggle');
             if (toggleHeader) {
-                toggleHeader.addEventListener('click', () => {
+                toggleHeader.addEventListener('click', (e) => {
+                    // Evitar que el clic en el botón de claim oculte el panel
+                    if(e.target.id === 'gow-btn-claim') return;
+                    
                     const box = document.getElementById('gow-content-box');
                     const btn = widget.querySelector('.gow-toggle-btn');
                     const currentlyMin = box.classList.toggle('minimized');
@@ -272,6 +289,44 @@
                     if (btn) btn.textContent = currentlyMin ? '[+] Show' : '[-] Hide';
                 });
             }
+        }
+
+        // EVENTO DEL BOTÓN CLAIM
+        const claimBtn = document.getElementById('gow-btn-claim');
+        if (claimBtn) {
+            claimBtn.addEventListener('click', (e) => {
+                e.stopPropagation(); // Evita plegar el widget en otras páginas
+                if (!canClaim) {
+                    alert('Already Claimed! You must wait a full week (7 days) before claiming again.');
+                    return;
+                }
+                
+                claimBtn.textContent = "WAIT...";
+                claimBtn.disabled = true;
+
+                const claimUrl = GOV_ORDERS_URL + "?action=claim&citizenId=" + citizenId + "&t=" + new Date().getTime();
+
+                GM_xmlhttpRequest({
+                    method: "GET",
+                    url: claimUrl,
+                    onload: function(res) {
+                        try {
+                            const response = JSON.parse(res.responseText);
+                            if (response.success) {
+                                GM_setValue('gow_last_claim_' + citizenId, new Date().getTime());
+                                claimBtn.textContent = "CLAIMED";
+                                alert('Success! Your claim has been registered in the Government log.');
+                            } else {
+                                throw new Error("Invalid response");
+                            }
+                        } catch(err) {
+                            claimBtn.textContent = "CLAIM!";
+                            claimBtn.disabled = false;
+                            alert('Oops! Could not connect to the Google Sheet. Please try again later.');
+                        }
+                    }
+                });
+            });
         }
 
         document.querySelectorAll('.gow-close-inst').forEach(btn => {
