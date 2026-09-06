@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
 // @version      1.4.8
-// @description  Gov orders widget - Live Tracking, Weekly Claim, Auto-Placement Fix & ID logging
+// @description  Gov orders widget - Live Tracking, Weekly Claim, Auto-Placement & Names/IDs
 // @author       ZaraL
 // @match        https://www.erepublik.com/*
 // @grant        GM_xmlhttpRequest
@@ -81,9 +81,7 @@
     `);
 
     function isLoggedIn() {
-        if (document.getElementById('login_form') || document.querySelector('input[name="commit_login"]')) {
-            return false;
-        }
+        if (document.getElementById('login_form') || document.querySelector('input[name="commit_login"]')) return false;
         const citizenId = extractCitizenId();
         return citizenId !== "0" && citizenId !== 0 && citizenId !== null;
     }
@@ -98,9 +96,7 @@
 
     function extractCitizenId() {
         try {
-            if (window.SERVER_DATA && window.SERVER_DATA.citizenId) {
-                return window.SERVER_DATA.citizenId;
-            }
+            if (window.SERVER_DATA && window.SERVER_DATA.citizenId) return window.SERVER_DATA.citizenId;
             const profileLink = document.querySelector('a.user_avatar') || document.querySelector('a[href*="/citizen/profile/"]');
             if (profileLink && profileLink.href) {
                 const match = profileLink.href.match(/\/profile\/(\d+)/);
@@ -110,25 +106,16 @@
         return "0";
     }
 
-    // EXTRAE EL NOMBRE DEL JUGADOR (MEJORADO)
+    // EXTRAE EL NOMBRE DEL JUGADOR (BLINDADO)
     function extractCitizenName() {
         try {
-            // 1. Intentamos leer la variable oficial
-            if (window.SERVER_DATA && window.SERVER_DATA.name) {
-                return window.SERVER_DATA.name;
-            }
-            // 2. Buscamos el "alt" del avatar (suele ser el nombre)
-            const avatarImg = document.querySelector('.user_avatar img') || document.querySelector('a[href*="/citizen/profile/"] img');
-            if (avatarImg && avatarImg.alt) {
-                return avatarImg.alt.trim();
-            }
-            // 3. Buscamos el texto del enlace de perfil
-            const profileLink = document.querySelector('.user_name') || document.querySelector('.user_info a[href*="/citizen/profile/"]');
-            if (profileLink && profileLink.textContent.trim() !== '') {
-                return profileLink.textContent.trim();
-            }
+            if (window.SERVER_DATA && window.SERVER_DATA.name) return window.SERVER_DATA.name;
+            const linkName = document.querySelector('.user_info a[href*="/citizen/profile/"]') || document.querySelector('.citizen_info a[href*="/citizen/profile/"]');
+            if (linkName && linkName.textContent.trim() !== "") return linkName.textContent.trim();
+            const avatar = document.querySelector('.user_avatar img') || document.querySelector('img.avatar');
+            if (avatar && avatar.alt) return avatar.alt.trim();
         } catch(e) {}
-        return "";
+        return "Unknown";
     }
 
     function extractCitizenCountry() {
@@ -136,9 +123,7 @@
             const hoverElement = document.querySelector('[title^="Citizen of "]');
             if (hoverElement) {
                 const titleText = hoverElement.getAttribute('title');
-                if (titleText) {
-                    return titleText.replace('Citizen of ', '').trim();
-                }
+                if (titleText) return titleText.replace('Citizen of ', '').trim();
             }
             const societyLink = document.querySelector('.user_info a[href*="/country/society/"], .user_section a[href*="/country/society/"]');
             if (societyLink && societyLink.href) {
@@ -146,9 +131,7 @@
                 const countrySlug = urlParts[urlParts.length - 1]; 
                 return countrySlug.replace(/-/g, ' ').replace(/\?.*$/, '').trim();
             }
-            if (window.SERVER_DATA && window.SERVER_DATA.citizenshipCountryId) {
-                return window.SERVER_DATA.citizenshipCountryId;
-            }
+            if (window.SERVER_DATA && window.SERVER_DATA.citizenshipCountryId) return window.SERVER_DATA.citizenshipCountryId;
         } catch(e) {}
         return "";
     }
@@ -163,16 +146,12 @@
 
         const currentDay = spainDate.getDay();
         let daysToSubtract = (currentDay >= 2) ? (currentDay - 2) : (currentDay + 5);
-        
-        if (currentDay === 2 && spainDate.getHours() < 9) {
-            daysToSubtract = 7;
-        }
+        if (currentDay === 2 && spainDate.getHours() < 9) daysToSubtract = 7;
 
         target.setDate(target.getDate() - daysToSubtract);
         return target.getTime();
     }
 
-    // NUEVO GESTOR DE POSICIÓN (PLAN A, B y C)
     function getOrCreateWidget() {
         let widget = document.getElementById('gov-orders-inline');
         if (widget) return widget;
@@ -180,7 +159,6 @@
         widget = document.createElement('div');
         widget.id = 'gov-orders-inline';
 
-        // 1. En batallas (se pone arriba del todo)
         if (window.location.href.includes('/military/battlefield')) {
             const pvp = document.getElementById('pvp') || document.querySelector('.paged_header');
             if (pvp && pvp.parentNode) {
@@ -189,28 +167,24 @@
             }
         }
 
-        // 2. En la página de inicio (Homepage) - Intento 1: Debajo del reto semanal
         const weekly = document.getElementById('weekly_challenge') || document.querySelector('.weekly_challenge');
         if (weekly && weekly.parentNode) {
             weekly.parentNode.insertBefore(widget, weekly.nextSibling);
             return widget;
         }
 
-        // 3. Intento 2: Encima de las noticias / Top Rated Articles
         const newsFeed = document.querySelector('.top_rated_articles') || document.querySelector('.news_feed') || document.getElementById('news');
         if (newsFeed && newsFeed.parentNode) {
             newsFeed.parentNode.insertBefore(widget, newsFeed);
             return widget;
         }
 
-        // 4. Intento 3: Arriba de la columna central general
         const content = document.querySelector('.column.content') || document.getElementById('content') || document.querySelector('#main');
         if (content) {
             content.insertBefore(widget, content.firstChild);
             return widget;
         }
 
-        // 5. Fallback final
         document.body.insertBefore(widget, document.body.firstChild);
         return widget;
     }
