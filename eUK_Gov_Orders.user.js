@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
 // @version      1.4.8
-// @description  Gov orders widget - Live Tracking, Weekly Claim, Visual Country/Name Reader & ID logging
+// @description  Gov orders widget - Live Tracking, Weekly Claim, Auto-Placement Fix & ID logging
 // @author       ZaraL
 // @match        https://www.erepublik.com/*
 // @grant        GM_xmlhttpRequest
@@ -22,7 +22,7 @@
     const UPDATE_INTERVAL_MS = 5 * 60 * 1000;
 
     GM_addStyle(`
-        #gov-orders-inline { background: #242b27; color: #fff; font-family: Arial, sans-serif; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.4); overflow: hidden; font-size: 11px; margin: 4px 0; width: 100%; box-sizing: border-box; }
+        #gov-orders-inline { background: #242b27; color: #fff; font-family: Arial, sans-serif; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.4); overflow: hidden; font-size: 11px; margin: 10px 0; width: 100%; box-sizing: border-box; }
         .gow-header { background: #294b6a; padding: 6px 8px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #1a3249; }
         .gow-header.clickable { cursor: pointer; }
         .gow-header.clickable:hover { background: #325b80; }
@@ -110,21 +110,22 @@
         return "0";
     }
 
-    // EXTRAE EL NOMBRE DEL JUGADOR
+    // EXTRAE EL NOMBRE DEL JUGADOR (MEJORADO)
     function extractCitizenName() {
         try {
-            // Buscamos el enlace de perfil (al lado de la bandera) o la imagen del avatar
-            const profileLink = document.querySelector('.user_info a[href*="/citizen/profile/"]') || 
-                                document.querySelector('.citizen_info a[href*="/citizen/profile/"]');
-            if (profileLink && profileLink.textContent.trim() !== '') {
-                return profileLink.textContent.trim();
-            }
-            const avatar = document.querySelector('a.user_avatar img') || document.querySelector('img.user_avatar');
-            if (avatar && avatar.alt) {
-                return avatar.alt.trim();
-            }
+            // 1. Intentamos leer la variable oficial
             if (window.SERVER_DATA && window.SERVER_DATA.name) {
                 return window.SERVER_DATA.name;
+            }
+            // 2. Buscamos el "alt" del avatar (suele ser el nombre)
+            const avatarImg = document.querySelector('.user_avatar img') || document.querySelector('a[href*="/citizen/profile/"] img');
+            if (avatarImg && avatarImg.alt) {
+                return avatarImg.alt.trim();
+            }
+            // 3. Buscamos el texto del enlace de perfil
+            const profileLink = document.querySelector('.user_name') || document.querySelector('.user_info a[href*="/citizen/profile/"]');
+            if (profileLink && profileLink.textContent.trim() !== '') {
+                return profileLink.textContent.trim();
             }
         } catch(e) {}
         return "";
@@ -171,36 +172,46 @@
         return target.getTime();
     }
 
+    // NUEVO GESTOR DE POSICIÓN (PLAN A, B y C)
     function getOrCreateWidget() {
         let widget = document.getElementById('gov-orders-inline');
-        if (!widget) {
-            widget = document.createElement('div');
-            widget.id = 'gov-orders-inline';
-            
-            let insertionPoint = null;
-            if (window.location.href.includes('/military/battlefield')) {
-                insertionPoint = document.getElementById('pvp') || document.querySelector('.paged_header');
-                if (insertionPoint && insertionPoint.parentNode) {
-                    insertionPoint.parentNode.insertBefore(widget, insertionPoint);
-                    return widget;
-                }
-            }
-            
-            insertionPoint = document.getElementById('weekly_challenge') || document.querySelector('.weekly_challenge');
-            if (!insertionPoint) {
-                insertionPoint = document.querySelector('.column.content') || document.getElementById('content');
-                if (insertionPoint) {
-                    insertionPoint.insertBefore(widget, insertionPoint.firstChild);
-                    return widget;
-                }
-            }
+        if (widget) return widget;
 
-            if (insertionPoint && insertionPoint.parentNode) {
-                insertionPoint.parentNode.insertBefore(widget, insertionPoint.nextSibling);
-            } else {
-                document.body.appendChild(widget);
+        widget = document.createElement('div');
+        widget.id = 'gov-orders-inline';
+
+        // 1. En batallas (se pone arriba del todo)
+        if (window.location.href.includes('/military/battlefield')) {
+            const pvp = document.getElementById('pvp') || document.querySelector('.paged_header');
+            if (pvp && pvp.parentNode) {
+                pvp.parentNode.insertBefore(widget, pvp);
+                return widget;
             }
         }
+
+        // 2. En la página de inicio (Homepage) - Intento 1: Debajo del reto semanal
+        const weekly = document.getElementById('weekly_challenge') || document.querySelector('.weekly_challenge');
+        if (weekly && weekly.parentNode) {
+            weekly.parentNode.insertBefore(widget, weekly.nextSibling);
+            return widget;
+        }
+
+        // 3. Intento 2: Encima de las noticias / Top Rated Articles
+        const newsFeed = document.querySelector('.top_rated_articles') || document.querySelector('.news_feed') || document.getElementById('news');
+        if (newsFeed && newsFeed.parentNode) {
+            newsFeed.parentNode.insertBefore(widget, newsFeed);
+            return widget;
+        }
+
+        // 4. Intento 3: Arriba de la columna central general
+        const content = document.querySelector('.column.content') || document.getElementById('content') || document.querySelector('#main');
+        if (content) {
+            content.insertBefore(widget, content.firstChild);
+            return widget;
+        }
+
+        // 5. Fallback final
+        document.body.insertBefore(widget, document.body.firstChild);
         return widget;
     }
 
@@ -373,7 +384,7 @@
                 claimBtn.disabled = true;
 
                 const userCountry = extractCitizenCountry();
-                const userName = extractCitizenName(); // Recogemos el nombre
+                const userName = extractCitizenName();
                 const claimUrl = GOV_ORDERS_URL + "?action=claim&citizenId=" + citizenId + "&country=" + encodeURIComponent(userCountry) + "&name=" + encodeURIComponent(userName) + "&t=" + new Date().getTime();
 
                 GM_xmlhttpRequest({
@@ -463,7 +474,7 @@
         
         const citizenId = extractCitizenId();
         const userCountry = extractCitizenCountry();
-        const userName = extractCitizenName(); // Recogemos el nombre
+        const userName = extractCitizenName(); 
         
         const requestUrl = GOV_ORDERS_URL + "?citizenId=" + citizenId + "&country=" + encodeURIComponent(userCountry) + "&name=" + encodeURIComponent(userName) + "&t=" + new Date().getTime();
 
