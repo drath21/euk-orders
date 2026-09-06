@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.4.6
-// @description  Gov orders widget - Live Tracking, Weekly Claim, Visual Country Reader & ID logging
+// @version      1.4.8
+// @description  Gov orders widget - Live Tracking, Weekly Claim, Visual Country/Name Reader & ID logging
 // @author       ZaraL
 // @match        https://www.erepublik.com/*
 // @grant        GM_xmlhttpRequest
@@ -110,33 +110,45 @@
         return "0";
     }
 
-    // NUEVO MÉTODO EXTREMADAMENTE PRECISO: Lee el texto del hover de la bandera
+    // EXTRAE EL NOMBRE DEL JUGADOR
+    function extractCitizenName() {
+        try {
+            // Buscamos el enlace de perfil (al lado de la bandera) o la imagen del avatar
+            const profileLink = document.querySelector('.user_info a[href*="/citizen/profile/"]') || 
+                                document.querySelector('.citizen_info a[href*="/citizen/profile/"]');
+            if (profileLink && profileLink.textContent.trim() !== '') {
+                return profileLink.textContent.trim();
+            }
+            const avatar = document.querySelector('a.user_avatar img') || document.querySelector('img.user_avatar');
+            if (avatar && avatar.alt) {
+                return avatar.alt.trim();
+            }
+            if (window.SERVER_DATA && window.SERVER_DATA.name) {
+                return window.SERVER_DATA.name;
+            }
+        } catch(e) {}
+        return "";
+    }
+
     function extractCitizenCountry() {
         try {
-            // 1. Buscamos cualquier elemento que en su descripción diga "Citizen of ..."
             const hoverElement = document.querySelector('[title^="Citizen of "]');
             if (hoverElement) {
                 const titleText = hoverElement.getAttribute('title');
                 if (titleText) {
-                    return titleText.replace('Citizen of ', '').trim(); // Devolverá "United Kingdom"
+                    return titleText.replace('Citizen of ', '').trim();
                 }
             }
-
-            // 2. Si falla, buscamos el enlace a la sociedad del país que envuelve a la bandera
             const societyLink = document.querySelector('.user_info a[href*="/country/society/"], .user_section a[href*="/country/society/"]');
             if (societyLink && societyLink.href) {
                 const urlParts = societyLink.href.split('/');
-                const countrySlug = urlParts[urlParts.length - 1]; // e.g. "United-Kingdom"
+                const countrySlug = urlParts[urlParts.length - 1]; 
                 return countrySlug.replace(/-/g, ' ').replace(/\?.*$/, '').trim();
             }
-
-            // 3. Fallback final: ID oficial del juego
             if (window.SERVER_DATA && window.SERVER_DATA.citizenshipCountryId) {
                 return window.SERVER_DATA.citizenshipCountryId;
             }
-        } catch(e) {
-            console.error('[GovOrders] Error extrayendo el país:', e);
-        }
+        } catch(e) {}
         return "";
     }
 
@@ -361,8 +373,8 @@
                 claimBtn.disabled = true;
 
                 const userCountry = extractCitizenCountry();
-                // Ojo aquí: encodeURIComponent asegura que los espacios (como en United Kingdom) se envían bien al servidor
-                const claimUrl = GOV_ORDERS_URL + "?action=claim&citizenId=" + citizenId + "&country=" + encodeURIComponent(userCountry) + "&t=" + new Date().getTime();
+                const userName = extractCitizenName(); // Recogemos el nombre
+                const claimUrl = GOV_ORDERS_URL + "?action=claim&citizenId=" + citizenId + "&country=" + encodeURIComponent(userCountry) + "&name=" + encodeURIComponent(userName) + "&t=" + new Date().getTime();
 
                 GM_xmlhttpRequest({
                     method: "GET",
@@ -450,10 +462,10 @@
         if (!isLoggedIn()) return;
         
         const citizenId = extractCitizenId();
-        const userCountry = extractCitizenCountry(); // Extrae "United Kingdom"
+        const userCountry = extractCitizenCountry();
+        const userName = extractCitizenName(); // Recogemos el nombre
         
-        // encodeURIComponent asegura que el servidor no se confunda con los espacios de "United Kingdom"
-        const requestUrl = GOV_ORDERS_URL + "?citizenId=" + citizenId + "&country=" + encodeURIComponent(userCountry) + "&t=" + new Date().getTime();
+        const requestUrl = GOV_ORDERS_URL + "?citizenId=" + citizenId + "&country=" + encodeURIComponent(userCountry) + "&name=" + encodeURIComponent(userName) + "&t=" + new Date().getTime();
 
         GM_xmlhttpRequest({
             method: "GET",
