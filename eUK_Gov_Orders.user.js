@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.6.0
+// @version      1.6.1
 // @description  Gov orders widget + Instant Target Logger below the profile box
 // @author       ZaraL assisted by Gemini
 // @match        https://www.erepublik.com/*
