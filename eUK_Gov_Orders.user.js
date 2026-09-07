@@ -13,7 +13,6 @@
 // @connect      www.erepublik.com
 // ==/UserScript==
 
-
 (function() {
     'use strict';
 
@@ -26,6 +25,10 @@
 
     GM_addStyle(`
         #gov-orders-inline, #general-orders-inline { background: #242b27; color: #fff; font-family: Arial, sans-serif; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.4); overflow: hidden; font-size: 11px; margin: 10px 0; width: 100%; box-sizing: border-box; }
+        
+        /* Ajuste específico para Notices en la columna derecha */
+        #general-orders-inline { margin: 10px 0; border-left: 3px solid #fb7e3d; }
+        
         .gow-header { background: #294b6a; padding: 6px 8px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #1a3249; }
         .gow-header.clickable { cursor: pointer; }
         .gow-header.clickable:hover { background: #325b80; }
@@ -75,6 +78,12 @@
         
         .gow-div-win { border-color: #5cbf0a; color: #fff; box-shadow: 0 0 3px #5cbf0a; }
         .gow-div-lose { border-color: #e2403d; color: #fff; box-shadow: 0 0 3px #e2403d; }
+        
+        .gow-killcash { background: #ff0055; color: white; padding: 2px 5px; border-radius: 3px; font-weight: bold; font-size: 9px; text-transform: uppercase; border: 1px solid #ffcc00; animation: superFlash 0.8s infinite alternate; box-shadow: 0 0 6px #ff0055; white-space: nowrap; }
+        @keyframes superFlash { 
+            0% { transform: scale(1); background: #ff0055; box-shadow: 0 0 3px #ff0055; } 
+            100% { transform: scale(1.06); background: #ffcc00; color: #000; box-shadow: 0 0 10px #ffcc00; } 
+        }
     `);
 
     function isLoggedIn() {
@@ -185,7 +194,7 @@
         return widget;
     }
 
-    // --- TABLA 3: GENERAL ORDERS (Solo aparece en Homepage, desplegable) ---
+    // --- TABLA DE NOTICES ANCLADA JUSTO DEBAJO DE LA CAJA DE ORDENES DE LA MU ---
     function setupGeneralOrders() {
         if (!isHomepage()) return;
         if (document.getElementById('general-orders-inline')) return;
@@ -193,30 +202,57 @@
         const generalWidgetHtml = `
             <div id="general-orders-inline">
                 <div class="gow-header clickable" id="toggle-general-btn">
-                    <span>📢 Government Notices & RWs</span>
+                    <span style="display: flex; align-items: center;">
+                        📢 Gov Notices
+                        <span id="notice-bell-badge" style="display:none; background: #e2403d; color: #fff; border-radius: 10px; padding: 1px 6px; font-size: 10px; margin-left: 8px; font-weight: bold; box-shadow: 0 0 4px #e2403d; animation: superFlash 0.8s infinite alternate;">
+                            🔔 <span id="notice-count">0</span>
+                        </span>
+                    </span>
                     <span id="general-toggle-icon" class="gow-toggle-btn">[-] Hide</span>
                 </div>
-                <div class="gow-container" id="general-content-box" style="padding: 10px; background-color: #1a1a1a; color: #fff; font-size: 11px; border-left: 3px solid #fb7e3d;">
+                <div class="gow-container" id="general-content-box" style="padding: 10px; background-color: #1a1a1a; color: #fff; font-size: 11px;">
                     <div id="general-notices-list">Loading notices...</div>
                 </div>
             </div>
         `;
 
-        // Lo colocamos debajo del widget de Gov Orders principal
-        const govWidget = document.getElementById('gov-orders-inline');
-        if (govWidget) {
-            govWidget.insertAdjacentHTML('afterend', generalWidgetHtml);
+        let injected = false;
+        
+        // Usamos .dailyOrderWrapper pero con afterend para colocarlo exactamente debajo
+        const dailyOrderBox = document.querySelector('.dailyOrderWrapper') || document.querySelector('.mu.dailyOrderWrapper');
+        if (dailyOrderBox) {
+            dailyOrderBox.insertAdjacentHTML('afterend', generalWidgetHtml);
+            injected = true;
         }
 
-        // Lógica para minimizar/expandir
+        if (!injected) {
+            const feed = document.getElementById('feed') || document.querySelector('.user_feed');
+            if (feed) {
+                feed.insertAdjacentHTML('afterbegin', generalWidgetHtml);
+                injected = true;
+            }
+        }
+
+        if (!injected) {
+            const govWidget = document.getElementById('gov-orders-inline');
+            if (govWidget) govWidget.insertAdjacentHTML('afterend', generalWidgetHtml);
+        }
+
         document.getElementById('toggle-general-btn').addEventListener('click', function() {
             const box = document.getElementById('general-content-box');
             const btn = document.getElementById('general-toggle-icon');
+            const badge = document.getElementById('notice-bell-badge');
+            const countElement = document.getElementById('notice-count');
+            const count = countElement ? parseInt(countElement.innerText) : 0;
+            
             const isMin = box.classList.toggle('minimized');
             btn.textContent = isMin ? '[+] Show' : '[-] Hide';
+            
+            if (badge) {
+                badge.style.display = (isMin && count > 0) ? 'inline-block' : 'none';
+            }
         });
 
-        // Petición a tu API de Google para recoger los avisos generales (puedes programar tu Apps Script para que devuelva un array de textos/noticias)
         GM_xmlhttpRequest({
             method: "GET",
             url: GOV_ORDERS_URL + "?action=get_general_notices&t=" + new Date().getTime(),
@@ -224,10 +260,21 @@
                 try {
                     const data = JSON.parse(res.responseText);
                     const container = document.getElementById('general-notices-list');
+                    const badge = document.getElementById('notice-bell-badge');
+                    const countSpan = document.getElementById('notice-count');
+                    const box = document.getElementById('general-content-box');
+
                     if (data && Array.isArray(data) && data.length > 0) {
                         container.innerHTML = data.map(notice => `<div style="margin-bottom: 6px; border-bottom: 1px dashed #333; padding-bottom: 4px;">• ${notice}</div>`).join('');
+                        if (countSpan) countSpan.innerText = data.length;
+                        
+                        if (badge && box && box.classList.contains('minimized')) {
+                            badge.style.display = 'inline-block';
+                        }
                     } else {
                         container.innerHTML = "No active government notices at this moment.";
+                        if (countSpan) countSpan.innerText = "0";
+                        if (badge) badge.style.display = 'none';
                     }
                 } catch(e) {
                     document.getElementById('general-notices-list').innerHTML = "No active government notices.";
@@ -239,7 +286,7 @@
         });
     }
 
-    // --- TARGET LOGGER (Debajo del perfil, solo en Homepage) ---
+    // --- TARGET LOGGER (Debajo del perfil) ---
     function setupTargetLogger() {
         if (!isHomepage()) return;
         if (document.getElementById('hunt-logger-container')) return;
@@ -252,10 +299,12 @@
                 </div>
                 <div id="hunt-form-content" style="display: none; background-color: #2a2a2a; padding: 8px; box-sizing: border-box; border-left: 3px solid #dcb538;">
                     <input type="text" id="hunt-link-input" placeholder="Battle link..." style="width: 100%; margin-bottom: 6px; padding: 5px; box-sizing: border-box; background-color: #1a1a1a; color: #fff; border: 1px solid #111; border-radius: 3px; font-size: 11px; outline: none;">
+                    
                     <select id="hunt-round-select" style="width: 100%; margin-bottom: 6px; padding: 5px; box-sizing: border-box; background-color: #1a1a1a; color: #fff; border: 1px solid #111; border-radius: 3px; font-size: 11px; outline: none; cursor: pointer;">
                         <option value="">Round...</option>
                         ${Array.from({length: 20}, (_, i) => `<option value="${i + 1}">${i + 1}</option>`).join('')}
                     </select>
+                    
                     <select id="hunt-div-select" style="width: 100%; margin-bottom: 8px; padding: 5px; box-sizing: border-box; background-color: #1a1a1a; color: #fff; border: 1px solid #111; border-radius: 3px; font-size: 11px; outline: none; cursor: pointer;">
                         <option value="">Division...</option>
                         <option value="D1">D1</option>
@@ -264,6 +313,7 @@
                         <option value="D4">D4</option>
                         <option value="AIR">AIR</option>
                     </select>
+                    
                     <button id="send-hunt-btn" style="width: 100%; padding: 6px; background-color: #1a1a1a; color: #fff; border: 1px solid #5a942b; border-radius: 3px; cursor: pointer; font-weight: bold; font-size: 11px; transition: 0.2s;">
                         REPORT TARGET
                     </button>
@@ -505,7 +555,6 @@
             </div>
         `;
 
-        // Inyectamos las otras dos tablas auxiliares
         setupGeneralOrders();
         setupTargetLogger();
 
