@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.6.1
+// @version      1.6.2
 // @description  Gov orders widget + Instant Target Logger below the profile box
 // @author       ZaraL assisted by Gemini
 // @match        https://www.erepublik.com/*
@@ -12,7 +12,6 @@
 // @connect      script.google.com
 // @connect      www.erepublik.com
 // ==/UserScript==
-
 (function() {
     'use strict';
 
@@ -194,7 +193,7 @@
         return widget;
     }
 
-    // --- TABLA DE NOTICES ANCLADA JUSTO DEBAJO DE LA CAJA DE ORDENES DE LA MU ---
+    // --- TABLA DE NOTICES RESTRICTA A LA COLUMNA DERECHA (#citizenFeed) ---
     function setupGeneralOrders() {
         if (!isHomepage()) return;
         if (document.getElementById('general-orders-inline')) return;
@@ -216,26 +215,41 @@
             </div>
         `;
 
-        let injected = false;
-        
-        // Usamos .dailyOrderWrapper pero con afterend para colocarlo exactamente debajo
-        const dailyOrderBox = document.querySelector('.dailyOrderWrapper') || document.querySelector('.mu.dailyOrderWrapper');
-        if (dailyOrderBox) {
-            dailyOrderBox.insertAdjacentHTML('afterend', generalWidgetHtml);
-            injected = true;
-        }
+        function placeNoticeBox() {
+            const existingWidget = document.getElementById('general-orders-inline');
+            const dailyOrderBox = document.querySelector('.dailyOrderWrapper') || document.querySelector('.mu.dailyOrderWrapper');
+            const citizenFeed = document.getElementById('citizenFeed') || document.querySelector('.column.feed');
 
-        if (!injected) {
-            const feed = document.getElementById('feed') || document.querySelector('.user_feed');
-            if (feed) {
-                feed.insertAdjacentHTML('afterbegin', generalWidgetHtml);
-                injected = true;
+            if (dailyOrderBox) {
+                if (existingWidget) {
+                    dailyOrderBox.parentNode.insertBefore(existingWidget, dailyOrderBox.nextSibling);
+                } else {
+                    dailyOrderBox.insertAdjacentHTML('afterend', generalWidgetHtml);
+                }
+                return true;
+            } else if (citizenFeed) {
+                if (!existingWidget) {
+                    citizenFeed.insertAdjacentHTML('afterbegin', generalWidgetHtml);
+                }
+                return true;
             }
+            return false;
         }
 
-        if (!injected) {
-            const govWidget = document.getElementById('gov-orders-inline');
-            if (govWidget) govWidget.insertAdjacentHTML('afterend', generalWidgetHtml);
+        // Intenta la colocación inicial
+        const placed = placeNoticeBox();
+
+        // Si Angular/eRepublik aún no ha insertado la caja de la MU, la esperamos sin salirnos del #citizenFeed
+        if (!placed || !document.querySelector('.dailyOrderWrapper')) {
+            const citizenFeed = document.getElementById('citizenFeed') || document.body;
+            const observer = new MutationObserver((mutations, obs) => {
+                const muBox = document.querySelector('.dailyOrderWrapper');
+                if (muBox) {
+                    placeNoticeBox();
+                    obs.disconnect();
+                }
+            });
+            observer.observe(citizenFeed, { childList: true, subtree: true });
         }
 
         document.getElementById('toggle-general-btn').addEventListener('click', function() {
