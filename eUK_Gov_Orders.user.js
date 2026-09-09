@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.6.2
+// @version      1.6.3
 // @description  Gov orders widget + Instant Target Logger below the profile box
 // @author       ZaraL assisted by Gemini
 // @match        https://www.erepublik.com/*
@@ -12,20 +12,20 @@
 // @connect      script.google.com
 // @connect      www.erepublik.com
 // ==/UserScript==
+
 (function() {
     'use strict';
 
     const GOV_ORDERS_URL = "https://script.google.com/macros/s/AKfycbyCCcZALnzVeFDHvzi0KUsMpELkSOGW--gT3BEcHKrCEo5wSHfTJmAfNo8nqyFMBFE/exec";
     
     // 🔗 PEGA AQUÍ LA URL DE TU GOOGLE APPS SCRIPT DE CACERÍAS
-    const GOOGLE_API_URL_HUNT = "YOUR_GOOGLE_APPS_SCRIPT_URL_HERE";
+    const GOOGLE_API_URL_HUNT = "https://script.google.com/macros/s/AKfycbwG6FTGoaLx5I9gNzz2vk07s8lBtFL3_rcGRtKKGCT4edKvblTCiomL09awLF8wtYMqcg/exec";
     
     const UPDATE_INTERVAL_MS = 5 * 60 * 1000;
 
     GM_addStyle(`
         #gov-orders-inline, #general-orders-inline { background: #242b27; color: #fff; font-family: Arial, sans-serif; border-radius: 4px; box-shadow: 0 2px 4px rgba(0,0,0,0.4); overflow: hidden; font-size: 11px; margin: 10px 0; width: 100%; box-sizing: border-box; }
         
-        /* Ajuste específico para Notices en la columna derecha */
         #general-orders-inline { margin: 10px 0; border-left: 3px solid #fb7e3d; }
         
         .gow-header { background: #294b6a; padding: 6px 8px; font-weight: bold; display: flex; justify-content: space-between; align-items: center; font-size: 12px; text-transform: uppercase; border-bottom: 1px solid #1a3249; }
@@ -193,7 +193,7 @@
         return widget;
     }
 
-    // --- TABLA DE NOTICES RESTRICTA A LA COLUMNA DERECHA (#citizenFeed) ---
+    // --- TABLA DE NOTICES CON VALIDACIÓN DE SEGURIDAD Y AUTO-EXPANDIDO (5 MIN) ---
     function setupGeneralOrders() {
         if (!isHomepage()) return;
         if (document.getElementById('general-orders-inline')) return;
@@ -236,10 +236,7 @@
             return false;
         }
 
-        // Intenta la colocación inicial
         const placed = placeNoticeBox();
-
-        // Si Angular/eRepublik aún no ha insertado la caja de la MU, la esperamos sin salirnos del #citizenFeed
         if (!placed || !document.querySelector('.dailyOrderWrapper')) {
             const citizenFeed = document.getElementById('citizenFeed') || document.body;
             const observer = new MutationObserver((mutations, obs) => {
@@ -252,6 +249,96 @@
             observer.observe(citizenFeed, { childList: true, subtree: true });
         }
 
+        // Lógica de minimizado con 5 minutos de memoria
+        const now = new Date().getTime();
+        const noticeMinTime = GM_getValue('gow_notices_minimized_time', 0);
+        let isNoticeMinimized = false;
+
+        if (now - noticeMinTime < 5 * 60 * 1000) { // 5 Minutos
+            isNoticeMinimized = GM_getValue('gow_notices_minimized', false);
+        } else {
+            isNoticeMinimized = false;
+            GM_setValue('gow_notices_minimized', false);
+        }
+
+        const contentBox = document.getElementById('general-content-box');
+        const toggleIcon = document.getElementById('general-toggle-icon');
+        if (isNoticeMinimized) {
+            contentBox.classList.add('minimized');
+            toggleIcon.textContent = '[+] Show';
+        }
+
+        const renderNotices = (data) => {
+            const container = document.getElementById('general-notices-list');
+            const badge = document.getElementById('notice-bell-badge');
+            const countSpan = document.getElementById('notice-count');
+            const box = document.getElementById('general-content-box');
+
+            if (data && data.error) {
+                container.innerHTML = `<span style="color:#e2403d;">🔒 ${data.error}</span>`;
+                if (countSpan) countSpan.innerText = "0";
+                if (badge) badge.style.display = 'none';
+                return;
+            }
+
+            if (data && Array.isArray(data) && data.length > 0) {
+                container.innerHTML = data.map(notice => {
+                    let formattedNotice = notice
+                        .replace(/\[b\](.*?)\[\/b\]/gi, '<b>$1</b>')
+                        .replace(/\[i\](.*?)\[\/i\]/gi, '<i>$1</i>')
+                        .replace(/\[u\](.*?)\[\/u\]/gi, '<u>$1</u>')
+                        .replace(/\[color=(.*?)\](.*?)\[\/color\]/gi, '<span style="color:$1">$2</span>');
+                    
+                    return `<div style="margin-bottom: 6px; border-bottom: 1px dashed #333; padding-bottom: 4px;">• ${formattedNotice}</div>`;
+                }).join('');
+
+                if (countSpan) countSpan.innerText = data.length;
+                if (badge && box && box.classList.contains('minimized')) {
+                    badge.style.display = 'inline-block';
+                }
+            } else {
+                container.innerHTML = "No active government notices at this moment.";
+                if (countSpan) countSpan.innerText = "0";
+                if (badge) badge.style.display = 'none';
+            }
+        };
+
+        const cachedNotices = GM_getValue('gow_notices_data', null);
+        const cachedTime = GM_getValue('gow_notices_time', 0);
+
+        if (cachedNotices && (now - cachedTime < 10 * 60 * 1000)) {
+            try {
+                renderNotices(JSON.parse(cachedNotices));
+            } catch(e) {}
+        } else {
+            const citizenId = extractCitizenId();
+            const userCountry = extractCitizenCountry();
+            const userName = extractCitizenName();
+
+            const requestUrl = GOV_ORDERS_URL + "?action=get_general_notices&citizenId=" + citizenId + "&country=" + encodeURIComponent(userCountry) + "&name=" + encodeURIComponent(userName) + "&t=" + now;
+
+            GM_xmlhttpRequest({
+                method: "GET",
+                url: requestUrl,
+                onload: function(res) {
+                    try {
+                        const parsedData = JSON.parse(res.responseText);
+                        if (!parsedData.error) {
+                            GM_setValue('gow_notices_data', res.responseText);
+                            GM_setValue('gow_notices_time', now);
+                        }
+                        renderNotices(parsedData);
+                    } catch(e) {
+                        document.getElementById('general-notices-list').innerHTML = "No active government notices.";
+                    }
+                },
+                onerror: function() {
+                    if (cachedNotices) renderNotices(JSON.parse(cachedNotices));
+                    else document.getElementById('general-notices-list').innerHTML = "Failed to load notices.";
+                }
+            });
+        }
+
         document.getElementById('toggle-general-btn').addEventListener('click', function() {
             const box = document.getElementById('general-content-box');
             const btn = document.getElementById('general-toggle-icon');
@@ -262,40 +349,11 @@
             const isMin = box.classList.toggle('minimized');
             btn.textContent = isMin ? '[+] Show' : '[-] Hide';
             
+            GM_setValue('gow_notices_minimized', isMin);
+            GM_setValue('gow_notices_minimized_time', new Date().getTime());
+
             if (badge) {
                 badge.style.display = (isMin && count > 0) ? 'inline-block' : 'none';
-            }
-        });
-
-        GM_xmlhttpRequest({
-            method: "GET",
-            url: GOV_ORDERS_URL + "?action=get_general_notices&t=" + new Date().getTime(),
-            onload: function(res) {
-                try {
-                    const data = JSON.parse(res.responseText);
-                    const container = document.getElementById('general-notices-list');
-                    const badge = document.getElementById('notice-bell-badge');
-                    const countSpan = document.getElementById('notice-count');
-                    const box = document.getElementById('general-content-box');
-
-                    if (data && Array.isArray(data) && data.length > 0) {
-                        container.innerHTML = data.map(notice => `<div style="margin-bottom: 6px; border-bottom: 1px dashed #333; padding-bottom: 4px;">• ${notice}</div>`).join('');
-                        if (countSpan) countSpan.innerText = data.length;
-                        
-                        if (badge && box && box.classList.contains('minimized')) {
-                            badge.style.display = 'inline-block';
-                        }
-                    } else {
-                        container.innerHTML = "No active government notices at this moment.";
-                        if (countSpan) countSpan.innerText = "0";
-                        if (badge) badge.style.display = 'none';
-                    }
-                } catch(e) {
-                    document.getElementById('general-notices-list').innerHTML = "No active government notices.";
-                }
-            },
-            onerror: function() {
-                document.getElementById('general-notices-list').innerHTML = "Failed to load notices.";
             }
         });
     }
@@ -550,18 +608,29 @@
             : `<button id="gow-btn-claim" class="gow-claim-btn" disabled title="Already claimed for this week. Resets Tuesday at 09:00 CET">CLAIMED</button>`;
 
         const onHome = isHomepage();
-        const isMinimized = GM_getValue('gow_minimized', false);
-        const shouldHide = !onHome && isMinimized;
-        const containerClass = shouldHide ? 'gow-container minimized' : 'gow-container';
-        
-        let headerHtml = `<div style="display:flex; align-items:center;"><span>eUK Gov Orders</span> ${claimBtnHtml}</div>`;
-        if (!onHome) {
-            const toggleText = shouldHide ? '[+] Show' : '[-] Hide';
-            headerHtml += `<span class="gow-toggle-btn">${toggleText}</span>`;
+        const now = new Date().getTime();
+        let isMinimized = false;
+
+        if (onHome) {
+            const homeMinTime = GM_getValue('gow_minimized_home_time', 0);
+            if (now - homeMinTime < 30 * 60 * 1000) { 
+                isMinimized = GM_getValue('gow_minimized_home', false);
+            } else {
+                isMinimized = false;
+                GM_setValue('gow_minimized_home', false); 
+            }
+        } else {
+            isMinimized = GM_getValue('gow_minimized', false);
         }
 
+        const containerClass = isMinimized ? 'gow-container minimized' : 'gow-container';
+        const toggleText = isMinimized ? '[+] Show' : '[-] Hide';
+        
+        let headerHtml = `<div style="display:flex; align-items:center;"><span>eUK Gov Orders</span> ${claimBtnHtml}</div>`;
+        headerHtml += `<span class="gow-toggle-btn">${toggleText}</span>`;
+
         widget.innerHTML = `
-            <div class="gow-header ${!onHome ? 'clickable' : ''}" id="gow-header-toggle">
+            <div class="gow-header clickable" id="gow-header-toggle">
                 ${headerHtml}
             </div>
             <div class="${containerClass}" id="gow-content-box">
@@ -572,18 +641,23 @@
         setupGeneralOrders();
         setupTargetLogger();
 
-        if (!onHome) {
-            const toggleHeader = document.getElementById('gow-header-toggle');
-            if (toggleHeader) {
-                toggleHeader.addEventListener('click', (e) => {
-                    if(e.target.id === 'gow-btn-claim') return;
-                    const box = document.getElementById('gow-content-box');
-                    const btn = widget.querySelector('.gow-toggle-btn');
-                    const currentlyMin = box.classList.toggle('minimized');
+        const toggleHeader = document.getElementById('gow-header-toggle');
+        if (toggleHeader) {
+            toggleHeader.addEventListener('click', (e) => {
+                if(e.target.id === 'gow-btn-claim') return;
+                const box = document.getElementById('gow-content-box');
+                const btn = widget.querySelector('.gow-toggle-btn');
+                const currentlyMin = box.classList.toggle('minimized');
+                
+                if (onHome) {
+                    GM_setValue('gow_minimized_home', currentlyMin);
+                    GM_setValue('gow_minimized_home_time', new Date().getTime());
+                } else {
                     GM_setValue('gow_minimized', currentlyMin);
-                    if (btn) btn.textContent = currentlyMin ? '[+] Show' : '[-] Hide';
-                });
-            }
+                }
+                
+                if (btn) btn.textContent = currentlyMin ? '[+] Show' : '[-] Hide';
+            });
         }
 
         const claimBtn = document.getElementById('gow-btn-claim');
@@ -671,9 +745,9 @@
             url: requestUrl,
             onload: function(response) {
                 try {
-                    const ordersArray = JSON.parse(response.responseText);
-                    if (Array.isArray(ordersArray)) {
-                        checkBattleStatuses(ordersArray);
+                    const parsed = JSON.parse(response.responseText);
+                    if (Array.isArray(parsed)) {
+                        checkBattleStatuses(parsed);
                     }
                 } catch (e) {}
             }
