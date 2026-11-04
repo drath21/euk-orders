@@ -1,6 +1,6 @@
 // ==UserScript==
 // @name         eUK Gov Orders (Mobile Version)
-// @version      1.7.0
+// @version      1.7.1
 // @description  Gov orders widget (Auto-hide ended battles & notify Sheet)
 // @author       ZaraL assisted by Gemini
 // @match        https://www.erepublik.com/*
@@ -474,6 +474,23 @@
             });
         }
     }
+
+    // 🔒 Si el servidor deniega el acceso: borra TODO lo guardado en caché y oculta las órdenes
+    function handleAccessDenied(message) {
+        GM_setValue('gow_cached_enriched', null);
+        GM_setValue('gow_notices_data', null);
+        GM_setValue('gow_notices_time', 0);
+        cachedERepData = null;
+        lastERepFetchTime = 0;
+
+        const widget = getOrCreateWidget();
+        widget.innerHTML = `<div class="gow-header">eUK Gov Orders</div><div class="gow-loading" style="color:#e2403d;">🔒 ${message || 'Access Denied'}</div>`;
+
+        const noticesList = document.getElementById('general-notices-list');
+        if (noticesList) noticesList.innerHTML = `<span style="color:#e2403d;">🔒 ${message || 'Access Denied'}</span>`;
+        const badge = document.getElementById('notice-bell-badge');
+        if (badge) badge.style.display = 'none';
+    }
     
 function notifySheetBattlesEnded(battleIds) {
         if (!battleIds || battleIds.length === 0) return;
@@ -569,6 +586,9 @@ function notifySheetBattlesEnded(battleIds) {
                     const parsed = JSON.parse(response.responseText);
                     if (Array.isArray(parsed)) {
                         checkBattleStatuses(parsed);
+                    } else if (parsed && parsed.error) {
+                        // El servidor ha denegado el acceso: limpiar caché y ocultar órdenes
+                        handleAccessDenied(parsed.error);
                     }
                 } catch (e) {}
             }
